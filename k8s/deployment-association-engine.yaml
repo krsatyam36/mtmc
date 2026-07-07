@@ -1,0 +1,49 @@
+# Deployment for the association-engine worker (consumes Kafka, writes
+# Postgres). Built from Dockerfile.central; runs kafka_consumer.py instead
+# of the query_api's uvicorn server as its container command.
+#
+# NOTE: design-only / unexecuted in this pass -- no k8s cluster is
+# available in this sandbox. Validated with:
+#   python3 -c "import yaml; yaml.safe_load_all(open('k8s/deployment-association-engine.yaml'))"
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: association-engine
+  labels:
+    app: association-engine
+    tier: central
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: association-engine
+  template:
+    metadata:
+      labels:
+        app: association-engine
+        tier: central
+    spec:
+      containers:
+        - name: association-engine
+          image: mtmc-central:latest
+          command: ["python3", "-m", "ingestion.kafka_consumer"]
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "mtmc-kafka-bootstrap:9092"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: mtmc-postgres-credentials
+                  key: database_url
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "1Gi"
+          readinessProbe:
+            exec:
+              command: ["python3", "-c", "import sys; sys.exit(0)"]
+            initialDelaySeconds: 5
+            periodSeconds: 15

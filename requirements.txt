@@ -1,0 +1,20 @@
+# MTMCT reference implementation dependencies.
+#
+# Core (already used by the in-memory reference code, likely already
+# installed in dev envs that ran the earlier prototypes):
+numpy
+fastapi
+uvicorn
+scipy
+
+# Added in this pass for live Kafka/Postgres wiring (gap-closure pass,
+# see context.txt dated entry). Install with:
+#   pip install -r requirements.txt
+kafka-python
+psycopg2-binary
+
+# Used by tests/load_test_gallery.py to measure real RSS memory usage.
+psutil
+
+# Used to validate k8s/*.yaml and docker-compose.yml syntax.
+PyYAML

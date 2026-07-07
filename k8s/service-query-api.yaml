@@ -1,0 +1,41 @@
+# ClusterIP service for internal traffic (e.g. from an ingress controller)
+# plus a LoadBalancer variant commented below for direct external exposure
+# in cloud environments that provision one (per scaling.txt's deployment
+# plan). Only one Service object is active by default (ClusterIP); switch
+# `type` to LoadBalancer if you want a cloud LB provisioned directly.
+#
+# NOTE: design-only / unexecuted in this pass -- no k8s cluster available.
+apiVersion: v1
+kind: Service
+metadata:
+  name: query-api
+  labels:
+    app: query-api
+spec:
+  type: ClusterIP
+  selector:
+    app: query-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      protocol: TCP
+
+---
+# Alternative: uncomment and apply instead of (or alongside, under a
+# different metadata.name) the ClusterIP Service above to get a
+# cloud-provisioned external IP directly, without an ingress controller.
+#
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: query-api-external
+# spec:
+#   type: LoadBalancer
+#   selector:
+#     app: query-api
+#   ports:
+#     - name: http
+#       port: 80
+#       targetPort: 8000
+#       protocol: TCP

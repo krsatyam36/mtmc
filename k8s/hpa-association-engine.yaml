@@ -1,0 +1,38 @@
+# HorizontalPodAutoscaler for the association-engine Deployment, matching
+# scaling.txt's autoscaling claim (scale out association-engine workers
+# with ingestion load / CPU pressure from Kafka consumer lag).
+#
+# NOTE: design-only / unexecuted in this pass -- no k8s cluster available;
+# autoscaling/v2's `metrics` block requires the metrics-server addon to be
+# installed in-cluster for the CPU-utilization target to function.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: association-engine-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: association-engine
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60

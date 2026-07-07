@@ -1,0 +1,52 @@
+# Deployment for the query_api FastAPI service (built from
+# Dockerfile.central, default CMD runs uvicorn on query_api.service:app).
+#
+# NOTE: design-only / unexecuted in this pass -- no k8s cluster available.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: query-api
+  labels:
+    app: query-api
+    tier: central
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: query-api
+  template:
+    metadata:
+      labels:
+        app: query-api
+        tier: central
+    spec:
+      containers:
+        - name: query-api
+          image: mtmc-central:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: mtmc-postgres-credentials
+                  key: database_url
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /docs
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /docs
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20

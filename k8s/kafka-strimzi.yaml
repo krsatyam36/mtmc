@@ -1,0 +1,78 @@
+# Reference Strimzi Kafka custom resource for a real k8s-native Kafka
+# cluster (production replacement for docker-compose's single-broker
+# confluentinc setup, which is local-dev-only).
+#
+# REQUIRES the Strimzi Cluster Operator to be installed in-cluster first
+# (it owns the `kafka.strimzi.io` CRDs this manifest instantiates):
+#   kubectl create namespace kafka
+#   kubectl apply -f 'https://strimzi.io/install/latest?namespace=kafka' -n kafka
+#
+# NOTE: design-only / unexecuted in this pass -- no k8s cluster or Strimzi
+# operator available in this sandbox. This file documents the intended
+# production topology (3-broker cluster, matching the Kafka BOM in
+# architecture_document.md section 4's "3x t3.medium Kafka cluster").
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: mtmc-kafka-cluster
+  namespace: kafka
+spec:
+  kafka:
+    version: 3.7.0
+    replicas: 3
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+      - name: tls
+        port: 9093
+        type: internal
+        tls: true
+    config:
+      offsets.topic.replication.factor: 3
+      transaction.state.log.replication.factor: 3
+      transaction.state.log.min.isr: 2
+      default.replication.factor: 3
+      min.insync.replicas: 2
+    storage:
+      type: persistent-claim
+      size: 100Gi
+      deleteClaim: false
+  zookeeper:
+    replicas: 3
+    storage:
+      type: persistent-claim
+      size: 20Gi
+      deleteClaim: false
+  entityOperator:
+    topicOperator: {}
+    userOperator: {}
+
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: tracklet-events
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: mtmc-kafka-cluster
+spec:
+  partitions: 12
+  replicas: 3
+  config:
+    retention.ms: 604800000  # 7 days
+
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: tracklet-reconciliation
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: mtmc-kafka-cluster
+spec:
+  partitions: 6
+  replicas: 3
+  config:
+    retention.ms: 2592000000  # 30 days, late-data reconciliation queue

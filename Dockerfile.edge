@@ -1,0 +1,35 @@
+# Dockerfile.edge -- CPU-portable stand-in for the edge-tier image.
+#
+# scaling.txt's deployment plan specifies real edge devices as NVIDIA
+# Jetson Orin Nano boards running a TensorRT-optimized ReID model, which
+# means production edge images would be built FROM an NVIDIA L4T
+# (Linux for Tegra) base image with TensorRT/CUDA baked in --
+# e.g. `nvcr.io/nvidia/l4t-tensorrt:r8.5.2-runtime` -- NOT available or
+# buildable in this sandbox (no ARM/Jetson hardware, no NVIDIA registry
+# access). This Dockerfile is a CPU-portable equivalent that runs the same
+# Python edge-side logic (tracklet generation via association_engine's
+# Tracklet class + a JSON producer, standing in for "reads a camera feed,
+# runs the ReID model, emits tracklet events") so the container is
+# buildable and runnable anywhere for demo/dev purposes.
+#
+# Build:
+#   docker build -f Dockerfile.edge -t mtmc-edge:latest .
+# Run (produces tracklet events onto Kafka -- requires docker-compose's
+# kafka service reachable, e.g. via `--network mtmc_default`):
+#   docker run --network mtmc_default \
+#     -e KAFKA_BOOTSTRAP_SERVERS=kafka:29092 \
+#     mtmc-edge:latest
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY association_engine/ association_engine/
+COPY run_live_demo.py .
+
+# In production this would launch a video-capture + TensorRT-inference
+# loop; here it runs the synthetic tracklet producer half of the live demo
+# so the container has a concrete, runnable entrypoint.
+CMD ["python3", "run_live_demo.py", "--produce-only"]

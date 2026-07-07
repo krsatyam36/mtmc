@@ -1,0 +1,30 @@
+# Dockerfile.central -- association_engine + gallery_service + query_api,
+# the "Central Tier" boxes from architecture_document.md section 1.
+#
+# Build:
+#   docker build -f Dockerfile.central -t mtmc-central:latest .
+# Run (in-memory mode, zero setup):
+#   docker run -p 8000:8000 mtmc-central:latest
+# Run (live Postgres mode, against docker-compose's postgres service):
+#   docker run -p 8000:8000 \
+#     -e DATABASE_URL=postgresql://mtmc:mtmc@host.docker.internal:5432/mtmc \
+#     mtmc-central:latest
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY association_engine/ association_engine/
+COPY gallery_service/ gallery_service/
+COPY query_api/ query_api/
+COPY ingestion/ ingestion/
+COPY schema.sql .
+
+EXPOSE 8000
+
+# Runs the FastAPI query_api service. DATABASE_URL, if set, switches
+# query_api/service.py to its Postgres-backed code path (see that file's
+# module docstring); unset, it falls back to the in-memory reference path.
+CMD ["uvicorn", "query_api.service:app", "--host", "0.0.0.0", "--port", "8000"]

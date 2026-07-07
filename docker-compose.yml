@@ -1,0 +1,63 @@
+# docker-compose.yml -- local dev infra for the MTMCT reference implementation.
+#
+# Brings up:
+#   - zookeeper + kafka (confluentinc images, single-node/single-broker,
+#     the simplest supported combo for local dev -- no KRaft complexity)
+#   - postgres (pgvector/pgvector:pg16 -- see db/init.sql for why this is a
+#     functional stand-in for the schema.sql design target rather than a
+#     true TimescaleDB+pgvector image; no upstream image bundles both)
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f kafka postgres
+#   docker compose down -v   # tear down + wipe volumes
+#
+# Once up: Kafka is reachable at localhost:9092 from the host (e.g. from
+# ingestion/kafka_consumer.py run directly with `python3`), and at
+# kafka:9092 from other containers on the compose network. Postgres is at
+# localhost:5432 (user/pass/db: mtmc/mtmc/mtmc).
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: mtmc-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: mtmc-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # Two listeners: one for other containers (kafka:29092), one for the
+      # host (localhost:9092) -- lets kafka_consumer.py run either inside
+      # or outside the compose network unmodified.
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: mtmc-postgres
+    environment:
+      POSTGRES_USER: mtmc
+      POSTGRES_PASSWORD: mtmc
+      POSTGRES_DB: mtmc
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - mtmc-pgdata:/var/lib/postgresql/data
+
+volumes:
+  mtmc-pgdata:
