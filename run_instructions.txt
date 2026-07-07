@@ -1,0 +1,255 @@
+================================================================================
+RUN INSTRUCTIONS — Live Demo Walkthrough for MTMCT
+Step-by-step commands to run the full pipeline live on a call.
+Run each block top to bottom, in order, from the repo root.
+================================================================================
+
+HOW TO USE THIS FILE
+─────────────────────
+Each section below has a short header explaining WHAT you're about to show
+and WHY it matters, followed by the exact command(s) to run. Read the
+header out loud (or paraphrase it) before running the command, so the
+interviewer knows what they're about to see. Expected output is noted
+under each command so you know what "it worked" looks like — if your
+output doesn't roughly match, stop and say so rather than plowing ahead.
+
+Total time to run everything: ~10-15 minutes, including Docker startup.
+If time is short on the call, Section 0-4 (no Docker needed) covers the
+core algorithm and evaluation — the most important part. Sections 5-8
+(live Kafka/Postgres) are the "bonus, it's really wired up" part.
+
+================================================================================
+SECTION 0: ONE-TIME SETUP (do this BEFORE the call, not during it)
+================================================================================
+
+0.1 — Clone the repo and enter it.
+
+    git clone https://github.com/krsatyam36/mtmc.git
+    cd mtmc
+
+0.2 — Create an isolated Python environment so nothing conflicts with
+      whatever else is on your machine.
+
+    python3 -m venv venv
+    source venv/bin/activate
+
+0.3 — Install all dependencies. This covers everything: the core engine,
+      the REST API, the Kafka/Postgres client libraries, and the test
+      tools.
+
+    pip install -r requirements.txt
+    pip install pytest
+
+    Expected: no errors. Takes under a minute.
+
+0.4 — (Only needed for Section 5 onward, the live infra demo) Make sure
+      Docker is installed and running.
+
+    docker --version
+    docker compose version
+
+    Expected: both print a version number. If either fails, Sections 5-8
+    won't work, but Sections 1-4 (the core algorithm) still will.
+
+================================================================================
+SECTION 1: THE CORE PROBLEM, IN ONE SENTENCE (say this, no command yet)
+================================================================================
+
+"This system assigns a stable, unique ID to every person seen across a
+network of cameras with gaps between them, and it has to do that using
+only appearance and physically-plausible travel time — not shared camera
+views. Let's see the two build components that prove this works."
+
+================================================================================
+SECTION 2: OPTION A — CROSS-CAMERA ASSOCIATION ENGINE
+================================================================================
+
+2.1 — Run the association engine end to end. This generates a synthetic
+      20-person, 5-camera dataset (with two people deliberately made to
+      look nearly identical), runs the matching engine twice — once using
+      only appearance, once using appearance plus physical-plausibility
+      priors — and prints the comparison.
+
+    python3 -m association_engine.src.run
+
+    Expected output (tail of it):
+      METRICS WITH PRIORS:      accuracy: 1.0   idf1: 1.0   id_switches: 0
+      METRICS WITHOUT PRIORS:   accuracy: 0.975 idf1: <1.0  id_switches: 1
+
+    Say: "Without the spatio-temporal prior, the engine confuses the two
+    lookalikes and produces an ID switch. With it, the engine recognizes
+    it's physically impossible for one person to be in two places that
+    fast, and gets it perfectly right."
+
+2.2 — Open and skim the metrics file this just wrote, if they want to see
+      it in Markdown form.
+
+    cat association_engine/evaluation_results.md
+
+2.3 — (Optional, if asked "does this scale past the toy dataset?") Run
+      the load test proving the engine handles 200-camera-scale
+      throughput, not just the small demo.
+
+    python3 tests/load_test_association.py
+
+    Expected (tail of output):
+      Final (N=20000) throughput vs. required 66.7 tracklets/sec:
+      ~27,000 events/sec (400x+ headroom)
+
+    Say: "This is measured, not estimated — I actually load-tested it at
+    the throughput my capacity math calls for, found a real bottleneck
+    the first time I ran it, fixed it, and this is the re-measured
+    number."
+
+================================================================================
+SECTION 3: OPTION B — SCALABLE EMBEDDING-GALLERY SERVICE
+================================================================================
+
+3.1 — Run the gallery service benchmark. This grows the gallery to
+      500,000 vectors, measures enrol/query latency at each size, sweeps
+      a recall-vs-latency tradeoff, and times eviction.
+
+    cd gallery_service/src
+    python3 benchmark.py
+    cd ../..
+
+    Expected (tail of output):
+      Recall traded away for latency: ~30ms -> ~3ms (~9-10x) at recall
+      1.000 -> ~0.10
+      Evicted 450000 records (9 shards) in <100 ms!
+
+    Say: "Dropping how many shards I search per query cuts latency by
+    roughly 10x at the cost of some recall — this is the real ANN-style
+    tradeoff the design calls for. And eviction of nearly half a million
+    records happens in milliseconds because it drops whole shards at
+    once, not row by row."
+
+================================================================================
+SECTION 4: PROVING THE TWO COMPONENTS ACTUALLY COMPOSE
+================================================================================
+
+4.1 — Run the integration demo: every identity decision Option A makes
+      gets enrolled into Option B's gallery, then a fresh noisy sighting
+      is queried back against it.
+
+    python3 -m association_engine.src.integration_demo
+
+    Expected (tail of output):
+      Gallery's #1 result matches association engine's global_id: True
+      Result: Option A's identity decisions and Option B's embedding
+      store agree end-to-end.
+
+    Say: "I built both components, and this proves they're not just two
+    separate demos — they genuinely work together."
+
+4.2 — Run the correctness/chaos tests: clock-drift rejection,
+      fragmentation-storm containment, out-of-window rejection, and
+      poisoned-embedding handling.
+
+    python3 -m pytest tests/test_failure_modes.py -v
+
+    Expected: 4 passed.
+
+================================================================================
+SECTION 5: LIVE INFRASTRUCTURE — BRING UP REAL KAFKA + POSTGRES
+================================================================================
+
+Say before running: "Everything so far ran in-memory. Now I'll show the
+same logic running against a real Kafka broker and a real Postgres
+database, not a simulation."
+
+5.1 — Start Kafka, Zookeeper, and Postgres via Docker Compose.
+
+    docker compose up -d
+
+    Expected: three containers start.
+
+5.2 — Confirm they're healthy and the schema was applied.
+
+    docker compose ps
+    docker exec mtmc-postgres psql -U mtmc -d mtmc -c '\dt'
+
+    Expected: `tracklets`, `global_identities`, `associations` tables
+    listed.
+
+================================================================================
+SECTION 6: LIVE PIPELINE — KAFKA -> ASSOCIATION -> POSTGRES -> QUERY API
+================================================================================
+
+6.1 — Run the end-to-end live demo: produces a real tracklet event onto
+      Kafka, consumes it, runs it through the association engine, writes
+      the result into Postgres.
+
+    export DATABASE_URL=postgresql://mtmc:mtmc@localhost:5432/mtmc
+    export KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+    python3 run_live_demo.py --live
+
+    Expected (tail of output):
+      [associated] camera=Cam_1 -> global_id=1
+      [postgres] wrote tracklet_id=... global_id=1
+      [associated] camera=Cam_2 -> global_id=1
+      [postgres] wrote tracklet_id=... global_id=1
+      SUCCESS: both tracklets resolved to the SAME global_id
+
+    Say: "Two sightings, on two different cameras, correctly resolved to
+    the same identity — and this went through a real message queue and a
+    real database, not memory."
+
+6.2 — Start the REST query API against that same live database.
+
+    uvicorn query_api.service:app --port 8010 &
+
+6.3 — Query it live, from a second terminal (or just run curl here).
+
+    curl http://127.0.0.1:8010/identities/1
+    curl "http://127.0.0.1:8010/identities/1/trajectory?since_minutes=60"
+
+    Expected: JSON responses showing the camera, timestamp, and path for
+    global_id 1 — the exact data just written in step 6.1.
+
+    Say: "This is the live 'where is this person right now' lookup the
+    task asks for, answered from a real database over a real HTTP API."
+
+6.4 — Stop the API server when done.
+
+    kill %1
+
+================================================================================
+SECTION 7: CONTAINERS (if asked "does this actually containerize?")
+================================================================================
+
+7.1 — Build and run the central services image.
+
+    docker build -f Dockerfile.central -t mtmc-central:latest .
+    docker run -d -p 8020:8000 --name mtmc-central-demo mtmc-central:latest
+    curl http://127.0.0.1:8020/docs
+
+    Expected: FastAPI's interactive docs page loads (confirms the
+    container is serving real HTTP).
+
+7.2 — Clean up.
+
+    docker stop mtmc-central-demo && docker rm mtmc-central-demo
+
+================================================================================
+SECTION 8: HONEST CLOSING NOTE (say this if asked "is everything live?")
+================================================================================
+
+Say: "Everything you just saw — the association engine, the gallery
+service, the Kafka/Postgres pipeline, the REST API, the containers — was
+actually run, not just written. The one piece I did NOT run live is
+applying the Kubernetes manifests to a real cluster, because I don't have
+one available. Those manifests are written and validated for syntax, but
+that's the one honestly-disclosed gap — everything else you just watched
+run for real."
+
+================================================================================
+SECTION 9: SHUT EVERYTHING DOWN AFTER THE CALL
+================================================================================
+
+    docker compose down -v
+    deactivate
+
+================================================================================
+END OF RUN INSTRUCTIONS
+================================================================================
